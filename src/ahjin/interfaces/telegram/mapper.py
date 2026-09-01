@@ -1,0 +1,43 @@
+"""Telegram Update ◄► TaskRequest / TaskResult mapper."""
+
+from ahjin.core.types import (
+    Modality,
+    RequestMetadata,
+    TaskContext,
+    TaskRequest,
+    TaskResult,
+    UserIntent,
+)
+
+
+class TelegramMapper:
+    """Translates Telegram data structures to canonical AHJIN domain types."""
+
+    @staticmethod
+    def to_task_request(chat_id: int, message_text: str) -> TaskRequest:
+        """Map Telegram message input to canonical TaskRequest."""
+        intent = UserIntent(
+            primary_text=message_text,
+            modality=Modality.TEXT,
+        )
+        context = TaskContext(
+            session_id=f"telegram:{chat_id}",
+            conversation_history=[],
+        )
+        metadata = RequestMetadata(
+            source_interface="telegram",
+        )
+        return TaskRequest(
+            intent=intent,
+            context=context,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def to_telegram_response(result: TaskResult) -> str:
+        """Map TaskResult to Telegram response text."""
+        if result.success and result.output_text:
+            return result.output_text
+        if result.error:
+            return f"Error [{result.error.code}]: {result.error.message}"
+        return "An unknown error occurred."

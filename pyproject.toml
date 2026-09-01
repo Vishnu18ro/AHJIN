@@ -1,0 +1,98 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ahjin"
+version = "2.0.0"
+description = "AHJIN 2.0 — Personal Agentic AI Operating Layer"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "httpx>=0.27.0",
+    "python-telegram-bot>=21.0.0",
+    "structlog>=24.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pyright>=1.1.0",
+    "ruff>=0.3.0",
+    "import-linter>=2.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ahjin"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+
+[tool.pyright]
+include = ["src"]
+exclude = ["**/__pycache__"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.importlinter]
+root_package = "ahjin"
+
+# --- Interface isolation ---
+# Telegram (and any future interface) MUST NOT directly import BERU, Harness, or Providers.
+# directs_only=true: checks only direct imports from the interface modules, not transitive deps.
+# This means legitimate dependencies like Core→BERU are not affected by this contract.
+[[tool.importlinter.contracts]]
+name = "Interfaces must not directly import BERU, Harness, or Providers"
+type = "forbidden"
+source_modules = "ahjin.interfaces"
+forbidden_modules = ["ahjin.beru", "ahjin.harness", "ahjin.providers"]
+ignore_imports = [
+    "ahjin.interfaces.telegram.bot -> ahjin.core.dispatcher",
+]
+
+# --- BERU isolation ---
+# BERU reasons about tasks. It must not touch execution, providers, or interface layers.
+[[tool.importlinter.contracts]]
+name = "BERU must not depend on Harness, Providers, or Interfaces"
+type = "forbidden"
+source_modules = "ahjin.beru"
+forbidden_modules = ["ahjin.harness", "ahjin.providers", "ahjin.interfaces"]
+directs_only = true
+
+# --- Provider isolation ---
+# Providers are leaf nodes. They must not depend on any other AHJIN subsystem.
+[[tool.importlinter.contracts]]
+name = "Providers must not depend on BERU, Harness, Interfaces, or Core Dispatcher"
+type = "forbidden"
+source_modules = "ahjin.providers"
+forbidden_modules = ["ahjin.beru", "ahjin.harness", "ahjin.interfaces", "ahjin.core.dispatcher"]
+directs_only = true
+
+# --- Research isolation ---
+# Research infra must never be imported by the production runtime.
+[[tool.importlinter.contracts]]
+name = "Research must not be imported by production runtime"
+type = "forbidden"
+source_modules = [
+    "ahjin.core",
+    "ahjin.beru",
+    "ahjin.harness",
+    "ahjin.providers",
+    "ahjin.interfaces",
+]
+forbidden_modules = ["ahjin.research"]
+directs_only = true
