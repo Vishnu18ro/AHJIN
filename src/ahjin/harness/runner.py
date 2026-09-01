@@ -1,6 +1,7 @@
 """Harness Runner — Step sequencing and execution engine."""
 
 import asyncio
+import time
 
 import httpx
 import structlog
@@ -35,16 +36,30 @@ class HarnessRunner:
 
         for step in plan.steps:
             if step.step_type == StepType.MODEL_INVOCATION and step.model_intent:
+                t0_ctx = time.monotonic()
                 prompt = self.context_assembler.assemble(
                     intent=step.model_intent,
                     task_context=context,
                     prior_results=state.step_results,
                 )
+                t_ctx_ms = (time.monotonic() - t0_ctx) * 1000.0
+                logger.info(
+                    "[PROFILE] ContextAssembler execution",
+                    step_id=str(step.step_id),
+                    context_assembly_ms=round(t_ctx_ms, 3),
+                )
 
+                t0_gw = time.monotonic()
                 try:
                     response = await self.gateway.invoke(
                         prompt=prompt,
                         requirements=step.model_intent.capability_requirements,
+                    )
+                    t_gw_ms = (time.monotonic() - t0_gw) * 1000.0
+                    logger.info(
+                        "[PROFILE] ProviderGateway execution",
+                        step_id=str(step.step_id),
+                        gateway_invoke_ms=round(t_gw_ms, 3),
                     )
                     step_res = StepResult(
                         step_id=step.step_id,

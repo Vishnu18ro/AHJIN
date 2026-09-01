@@ -1,6 +1,7 @@
 """Telegram Bot Adapter."""
 
 import asyncio
+import time
 from typing import Any
 
 import structlog
@@ -44,26 +45,44 @@ class TelegramAdapter(BaseInterfaceAdapter):
         if not update.message or not update.message.text:
             return
 
+        t0_recv = time.monotonic()
         chat_id = update.message.chat_id
         text = update.message.text
 
-        logger.info("Telegram message received", chat_id=chat_id)
+        logger.info("[PROFILE] Telegram update received", chat_id=chat_id, text_length=len(text))
 
         # 1. Map Telegram input to TaskRequest
+        t0_map = time.monotonic()
         request = TelegramMapper.to_task_request(chat_id, text)
+        t_map_ms = (time.monotonic() - t0_map) * 1000.0
 
         # 2. Dispatch to AHJIN Core — adapter-level error boundary.
-        #    Catches unexpected dispatch failures without business logic.
+        t0_dispatch = time.monotonic()
         try:
             result = await self.dispatcher.dispatch(request)
         except Exception as exc:
             logger.error("Unhandled dispatch error", chat_id=chat_id, error=str(exc))
             await update.message.reply_text("An internal error occurred. Please try again.")
             return
+        t_dispatch_ms = (time.monotonic() - t0_dispatch) * 1000.0
 
         # 3. Map TaskResult to Telegram output
         response_text = TelegramMapper.to_telegram_response(result)
+
+        # 4. Reply to Telegram chat
+        t0_reply = time.monotonic()
         await update.message.reply_text(response_text)
+        t_reply_ms = (time.monotonic() - t0_reply) * 1000.0
+        t_total_ms = (time.monotonic() - t0_recv) * 1000.0
+
+        logger.info(
+            "[PROFILE] Telegram message pipeline finished",
+            chat_id=chat_id,
+            input_mapping_ms=round(t_map_ms, 3),
+            core_dispatch_ms=round(t_dispatch_ms, 3),
+            telegram_send_ms=round(t_reply_ms, 3),
+            total_end_to_end_ms=round(t_total_ms, 3),
+        )
 
 
     async def start(self) -> None:

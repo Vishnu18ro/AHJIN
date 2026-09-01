@@ -61,6 +61,7 @@ class NvidiaProvider(BaseModelProvider):
         """Invoke NVIDIA OpenAI-compatible chat completions API."""
         start_time = time.monotonic()
 
+        t0_prep = time.monotonic()
         messages: list[dict[str, str]] = []
         if request.prompt.system_instruction:
             messages.append({"role": "system", "content": request.prompt.system_instruction})
@@ -83,15 +84,30 @@ class NvidiaProvider(BaseModelProvider):
         }
 
         url = f"{self.base_url}/chat/completions"
+        t_prep_ms = (time.monotonic() - t0_prep) * 1000.0
 
-        logger.info("Calling NVIDIA API", model=payload["model"], url=url)
+        logger.info("[PROFILE] Calling NVIDIA API start", model=payload["model"], url=url)
 
+        t0_net = time.monotonic()
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, json=payload, headers=headers)
+            t_net_ms = (time.monotonic() - t0_net) * 1000.0
             resp.raise_for_status()
+
+            t0_parse = time.monotonic()
             data: dict[str, Any] = resp.json()
+            t_parse_ms = (time.monotonic() - t0_parse) * 1000.0
 
         elapsed_ms = (time.monotonic() - start_time) * 1000.0
+
+        logger.info(
+            "[PROFILE] NVIDIA API response received",
+            model=payload["model"],
+            payload_prep_ms=round(t_prep_ms, 3),
+            network_http_ms=round(t_net_ms, 3),
+            json_parse_ms=round(t_parse_ms, 3),
+            provider_total_ms=round(elapsed_ms, 3),
+        )
 
         choices = data.get("choices", [])
         raw_content: str | None = choices[0]["message"].get("content") if choices else None
