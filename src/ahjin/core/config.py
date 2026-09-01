@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # model_id: no code default — must be set in environment or .env.
     # Rationale: model selection is operator-driven configuration, not a code decision.
     nvidia_model_id: str = ""
+    # max_tokens budget for model generation.
+    # Default 4096 allows complete responses without over-running typical Telegram payloads.
+    # Operators may lower this for latency-sensitive deployments or raise it for long-form tasks.
+    nvidia_max_tokens: int = 4096
 
     model_config = SettingsConfigDict(
         env_file=".env",

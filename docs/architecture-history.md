@@ -30,12 +30,4 @@
 
 ### 6. Provider Abstraction & Model Config Isolation
 - **Architectural Validation:** Changing model configuration via `NVIDIA_MODEL_ID` in `.env` required zero changes to Core, BERU, Harness, or Telegram adapter code.
-- **Runtime Observations:** Recorded empirical provider-side observations (e.g., DeepSeek model timeouts vs `nvidia/nemotron-3.5-lightning-30b-a3b` responsiveness) as temporary operational states rather than permanent architectural decisions.
-
-### 7. V1 Spine Latency Profiling & Empirical Diagnosis
-- **Measurement Goal:** Quantify exact latency distribution across all 11 stages of the V1 execution spine for trivial user requests (`"Hi"`, `"Hello"`, `"What is 2+2?"`).
-- **Empirical Results:**
-  - AHJIN internal latency (Core Dispatcher, BERU Orchestrator, Harness Runner, ContextAssembler, ProviderGateway): **< 1.0 ms** (< 0.01% of total time).
-  - External NVIDIA API HTTP network & GPU inference latency: **11.07s – 17.21s** (99.9% – 100% of total user-perceived delay).
-- **Diagnosis:** AHJIN internal code overhead is zero-friction. Latency is entirely attributable to non-streamed HTTP completion generation on remote NVIDIA GPU infrastructure.
-
+- **Runtime Observations:** Recorded empirical provider-side observations (e.g., `deepseek-ai/deepseek-v4-flash-0731` timeouts vs `meta/llama-3.2-11b-vision-instruct` responsiveness) as temporary operational states rather than permanent architectural decisions.

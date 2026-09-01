@@ -15,6 +15,36 @@ from ahjin.interfaces.telegram.mapper import TelegramMapper
 
 logger = structlog.get_logger()
 
+# Telegram's hard per-message character limit.
+# Messages exceeding this are split into sequential chunks.
+TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+
+
+def _chunk_message(text: str, chunk_size: int = TELEGRAM_MAX_MESSAGE_LENGTH) -> list[str]:
+    """Split text into chunks of at most chunk_size characters.
+
+    Splits on newline or space boundaries where possible to avoid
+    cutting mid-word. Falls back to hard split if no boundary exists.
+    """
+    if len(text) <= chunk_size:
+        return [text]
+
+    chunks: list[str] = []
+    while text:
+        if len(text) <= chunk_size:
+            chunks.append(text)
+            break
+        # Prefer splitting on a newline or space within the budget
+        split_at = text.rfind("\n", 0, chunk_size)
+        if split_at == -1:
+            split_at = text.rfind(" ", 0, chunk_size)
+        if split_at == -1:
+            # No safe boundary found — hard split at chunk_size
+            split_at = chunk_size
+        chunks.append(text[:split_at].rstrip())
+        text = text[split_at:].lstrip()
+    return [c for c in chunks if c]
+
 
 class TelegramAdapter(BaseInterfaceAdapter):
     """Telegram Interface Adapter."""
@@ -69,9 +99,19 @@ class TelegramAdapter(BaseInterfaceAdapter):
         # 3. Map TaskResult to Telegram output
         response_text = TelegramMapper.to_telegram_response(result)
 
-        # 4. Reply to Telegram chat
+        # 4. Reply to Telegram chat — chunked if response exceeds Telegram's limit.
         t0_reply = time.monotonic()
-        await update.message.reply_text(response_text)
+        chunks = _chunk_message(response_text)
+        for i, chunk in enumerate(chunks):
+            await update.message.reply_text(chunk)
+            if len(chunks) > 1:
+                logger.info(
+                    "[PROFILE] Telegram chunk sent",
+                    chat_id=chat_id,
+                    chunk_index=i + 1,
+                    total_chunks=len(chunks),
+                    chunk_length=len(chunk),
+                )
         t_reply_ms = (time.monotonic() - t0_reply) * 1000.0
         t_total_ms = (time.monotonic() - t0_recv) * 1000.0
 
@@ -82,6 +122,8 @@ class TelegramAdapter(BaseInterfaceAdapter):
             core_dispatch_ms=round(t_dispatch_ms, 3),
             telegram_send_ms=round(t_reply_ms, 3),
             total_end_to_end_ms=round(t_total_ms, 3),
+            response_chunks=len(chunks),
+            response_total_chars=len(response_text),
         )
 
 

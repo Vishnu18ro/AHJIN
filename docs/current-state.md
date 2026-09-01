@@ -43,7 +43,7 @@ NVIDIA Provider (`src/ahjin/providers/nvidia.py`)
 NVIDIA API Endpoint (`https://integrate.api.nvidia.com/v1`)
    │
    ▼
-Active Model (`nvidia/nemotron-3.5-lightning-30b-a3b`)
+Active Model (`meta/llama-3.2-11b-vision-instruct`)
    │
    ▼
 Model Response ──► Harness ──► BERU ──► Core ──► Telegram Adapter ──► Telegram Client
@@ -59,25 +59,19 @@ Verification of AHJIN 2.0 progressed through distinct tiers:
 2. **Simulated Interface Testing**: Programmatic verification via `TelegramMapper` verifying structural request/result mapping.
 3. **REAL Telegram End-to-End Testing**: Verified with an actual message sent from a live Telegram client, routed through the full AHJIN spine, executed against the NVIDIA API, and delivered back as a real reply to the Telegram chat.
 
-### V1 Spine Latency Profiling Milestone
-Empirical latency profiling was conducted across all 11 execution stages for real user requests (`"Hi"`, `"Hello"`, `"What is 2+2?"`):
-- **AHJIN Internal Latency**: **< 1.0 ms** across Core Dispatcher, BERU Orchestrator (`0.00ms`), Harness Runner, ContextAssembler (`0.00ms`), and ProviderGateway (`0.00ms`).
-- **External NVIDIA API Latency**: **11.07s – 17.21s** (accounting for **99.9% – 100%** of total end-to-end latency).
-- **Diagnosis**: AHJIN itself contributes **0.0% of system delay**. The entire delay stems from external non-streamed HTTP completion generation on remote GPUs.
-
 ### Telegram Runtime Fix
 During live testing, a concrete implementation defect was identified and resolved:
 - **Defect**: `TelegramAdapter.start()` executed `start_polling()` and immediately returned, causing `asyncio.run(main())` to terminate the event loop before updates could be received.
 - **Fix**: Implemented a lifecycle event wait (`await self._stop_event.wait()`) keeping the application and event loop alive during polling, with clean shutdown on `KeyboardInterrupt`.
 - **Classification**: Historical implementation/lifecycle fix (architecture remains unchanged).
 
-### Current Operational Model & Provider Diagnostics
-- **Active Model**: `nvidia/nemotron-3.5-lightning-30b-a3b`
-- **Classification**: OPERATIONAL CONFIGURATION VALUE set via `.env`, NOT a permanent architectural decision for AHJIN's default intelligence.
-- **Observed Provider Behavior**:
-  - DeepSeek models (`deepseek-ai/deepseek-v4-pro-0813`, `deepseek-ai/deepseek-v4-flash-0731`) experienced severe provider-side queuing timeouts (>45s) on NVIDIA NIM endpoints.
-  - `nvidia/nemotron-3.5-lightning-30b-a3b` responded consistently in 3.9s during direct provider probes and was activated in `.env`.
-  - Fresh NVIDIA API key provisioned and verified.
+### Temporary Operational Model Configuration
+- **Active Model**: `meta/llama-3.2-11b-vision-instruct`
+- **Classification**: TEMPORARY CURRENT V1 OPERATIONAL MODEL. This is an operational configuration value set via `.env`, NOT a permanent architectural decision for AHJIN's default intelligence.
+- **Observed Runtime Behavior**:
+  - `deepseek-ai/deepseek-v4-flash-0731` experienced repeated provider-side timeouts during the live testing window.
+  - Other probed models showed varying provider-side availability and response behaviors.
+  - These are empirical runtime/provider observations, not permanent architectural decisions or permanent model deprecations.
 
 ---
 
@@ -89,7 +83,6 @@ Changing model selection from `.env` without modifying Core, BERU, Harness, or T
 ### Current V1 Limitations
 AHJIN V1 is intentionally a working vertical spine, not the completed system:
 - Single configured operational model at a time (operator-set via config).
-- Non-streaming HTTP model invocations (streaming deferred to future phase).
 - No intelligent multi-model routing yet.
 - No capability-based dynamic model selection yet.
 - Memory, RAG, Tool registries, and Agent workflows remain unexpanded for future phases.
@@ -99,4 +92,4 @@ AHJIN V1 is intentionally a working vertical spine, not the completed system:
 ## 5. Next Major Phase
 
 **Phase 2 / Model Expansion**:
-- Model Abstraction + Capability-Aware Selection + Multi-Model Routing + Streaming Invocations.
+- Model Abstraction + Capability-Aware Model Selection + Multi-Model Routing.

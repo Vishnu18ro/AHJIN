@@ -30,12 +30,16 @@ class NvidiaProvider(BaseModelProvider):
         api_key: str | None = None,
         base_url: str | None = None,
         default_model: str | None = None,
+        max_tokens: int | None = None,
     ) -> None:
         self.api_key = settings.nvidia_api_key if api_key is None else api_key
         self.base_url = (base_url or settings.nvidia_base_url).rstrip("/")
         self.default_model = (
             settings.nvidia_model_id if default_model is None else default_model
         )
+        # max_tokens: configuration-driven, not hardcoded.
+        # Operators set NVIDIA_MAX_TOKENS in environment. Default is 4096.
+        self.max_tokens = max_tokens if max_tokens is not None else settings.nvidia_max_tokens
 
         # Fast-fail: do not allow construction with unconfigured credentials or model.
         # model selection is operator-driven configuration, not a code default (ADR-003).
@@ -75,7 +79,7 @@ class NvidiaProvider(BaseModelProvider):
             "model": request.model_id or self.default_model,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1024,
+            "max_tokens": self.max_tokens,
         }
 
         headers = {
@@ -120,6 +124,26 @@ class NvidiaProvider(BaseModelProvider):
                 "Try a different model or retry the request."
             )
 
+        # Map NVIDIA's raw finish_reason to AHJIN's canonical FinishReason.
+        # NVIDIA returns: 'stop' (natural end), 'length' (max_tokens hit), others.
+        # Previously hardcoded to COMPLETE — this masked truncation events.
+        raw_finish_reason: str = (
+            choices[0].get("finish_reason") or "stop"
+        ) if choices else "stop"
+        if raw_finish_reason == "length":
+            finish_reason = FinishReason.MAX_TOKENS
+        elif raw_finish_reason in ("stop", "eos"):
+            finish_reason = FinishReason.COMPLETE
+        else:
+            finish_reason = FinishReason.COMPLETE
+
+        logger.info(
+            "[PROFILE] NVIDIA finish_reason mapped",
+            raw_finish_reason=raw_finish_reason,
+            canonical_finish_reason=finish_reason.value,
+            max_tokens_configured=payload["max_tokens"],
+        )
+
         usage_data = data.get("usage", {})
         usage = TokenUsage(
             prompt_tokens=usage_data.get("prompt_tokens", 0),
@@ -130,7 +154,7 @@ class NvidiaProvider(BaseModelProvider):
         return ModelInvocationResponse(
             invocation_id=request.invocation_id,
             content=raw_content,
-            finish_reason=FinishReason.COMPLETE,
+            finish_reason=finish_reason,
             usage=usage,
             latency_ms=elapsed_ms,
             provider_id=self.provider_id,

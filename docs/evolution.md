@@ -24,11 +24,11 @@ Phase 9: Research & Evaluation (Benchmark suite, experiment tracking)
 
 ## Milestone Log
 
-### Phase 1: Vertical Spine Operational (Completed & Profiled)
-- **Status:** VERIFIED REAL-WORLD END-TO-END & PROFILED (<1ms internal latency).
+### Phase 1: Vertical Spine Operational (Completed)
+- **Status:** VERIFIED REAL-WORLD END-TO-END.
 - **Scope Achieved:** Real Telegram message ──► `TelegramAdapter` ──► `TaskDispatcher` ──► `BeruOrchestrator` ──► `HarnessRunner` (`ContextAssembler`) ──► `ProviderGateway` ──► `NvidiaProvider` ──► NVIDIA API ──► Telegram Response.
-- **Operational Model:** `nvidia/nemotron-3.5-lightning-30b-a3b` (Operational V1 model configured via `.env`).
-- **Verification:** Unit tests, static typing (Pyright), linting (Ruff), import boundaries (Import-Linter), real Telegram message verification, and 11-stage latency profiling.
+- **Operational Model:** `meta/llama-3.2-11b-vision-instruct` (Temporary operational V1 model).
+- **Verification:** Unit tests, static typing (Pyright), linting (Ruff), import boundaries (Import-Linter), and real Telegram message verification.
 
 ### Phase 2: Next Direction (Planned)
-- **Focus:** Model Abstraction + Capability-Aware Selection + Multi-Model Routing + Streaming Invocations.
+- **Focus:** Model Abstraction + Capability-Aware Selection + Multi-Model Routing.
