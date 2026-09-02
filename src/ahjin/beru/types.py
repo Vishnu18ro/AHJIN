@@ -25,11 +25,30 @@ class CapabilityRequirements(BaseModel):
     max_latency_ms: int | None = None
 
 
+class RecoveryPolicy(str, Enum):
+    """BERU recovery behavior on invocation failure."""
+
+    REROUTE = "REROUTE"
+    FAIL_FAST = "FAIL_FAST"
+
+
+class ExecutionStrategy(BaseModel):
+    """Provider/model-agnostic strategic task execution plan determined by BERU."""
+
+    capability_requirements: CapabilityRequirements = Field(default_factory=CapabilityRequirements)
+    preferred_tier: str = "FAST"
+    max_recovery_attempts: int = 2
+    require_verification: bool = True
+    recovery_policy: RecoveryPolicy = RecoveryPolicy.REROUTE
+    quality_preference: str = "balanced"  # "speed", "quality", "balanced"
+
+
 class ModelStepIntent(BaseModel):
-    """Model instruction and capability needs specified by BERU."""
+    """Model instruction and strategic intent specified by BERU."""
 
     instruction: str
     capability_requirements: CapabilityRequirements = Field(default_factory=CapabilityRequirements)
+    execution_strategy: ExecutionStrategy = Field(default_factory=ExecutionStrategy)
 
 
 class PlanStep(BaseModel):

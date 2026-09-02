@@ -34,20 +34,11 @@ class NvidiaProvider(BaseModelProvider):
     ) -> None:
         self.api_key = settings.nvidia_api_key if api_key is None else api_key
         self.base_url = (base_url or settings.nvidia_base_url).rstrip("/")
-        self.default_model = (
-            settings.nvidia_model_id if default_model is None else default_model
-        )
-        # max_tokens: configuration-driven, not hardcoded.
-        # Operators set NVIDIA_MAX_TOKENS in environment. Default is 4096.
+        self.default_model = default_model or ""
+        # max_tokens: configuration-driven fallback.
         self.max_tokens = max_tokens if max_tokens is not None else settings.nvidia_max_tokens
 
-        # Fast-fail: do not allow construction with unconfigured credentials or model.
-        # model selection is operator-driven configuration, not a code default (ADR-003).
-        if not self.default_model:
-            raise ValueError(
-                "NVIDIA_MODEL_ID is not configured. "
-                "Set it in environment or .env before constructing NvidiaProvider."
-            )
+        # Fast-fail: do not allow construction with unconfigured credentials.
         if not self.api_key:
             raise ValueError(
                 "NVIDIA_API_KEY is not configured. "
@@ -75,11 +66,18 @@ class NvidiaProvider(BaseModelProvider):
 
         messages.append({"role": "user", "content": request.prompt.user_instruction})
 
+        target_model_id = request.model_id or self.default_model
+        if not target_model_id:
+            raise ValueError(
+                "model_id is not specified in request or provider default. "
+                "Specify model_id in request or initialize NvidiaProvider(default_model=...)."
+            )
+
         payload = {
-            "model": request.model_id or self.default_model,
+            "model": target_model_id,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": self.max_tokens,
+            "max_tokens": request.max_tokens or self.max_tokens,
         }
 
         headers = {

@@ -17,12 +17,9 @@ class Settings(BaseSettings):
     # NvidiaProvider validates these at construction and raises clearly if missing.
     nvidia_api_key: str = ""
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
-    # model_id: no code default — must be set in environment or .env.
-    # Rationale: model selection is operator-driven configuration, not a code decision.
-    nvidia_model_id: str = ""
-    # max_tokens budget for model generation.
+    # max_tokens budget for model generation fallback.
     # Default 4096 allows complete responses without over-running typical Telegram payloads.
-    # Operators may lower this for latency-sensitive deployments or raise it for long-form tasks.
+    # Model limits in ModelCatalog take precedence per model descriptor.
     nvidia_max_tokens: int = 4096
 
     model_config = SettingsConfigDict(

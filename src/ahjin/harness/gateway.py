@@ -1,13 +1,23 @@
 """ProviderGateway — Capability matching and model provider lookup.
 
-v1 behaviour: uses the registry default provider unconditionally.
-CapabilityRequirements are received and logged; sophisticated routing
-is deferred to a future routing layer (see architecture docs).
+Translates BERU ExecutionStrategy / CapabilityRequirements via ModelRouter into a concrete
+(Provider, ModelID) selection and delegates invocation.
+
+CRITICAL CONTRACT:
+- ModelRouter is the authoritative selector in ALL production paths.
+- There is NO silent fallback that bypasses ModelRouter in production.
+- A KeyError from the provider registry (unknown provider_id) raises explicitly
+  so the bug is visible rather than masked by a default model bypass.
+- ProviderGateway attaches exc.model_id before re-raising so HarnessRunner
+  can reliably identify and exclude the failed model during same-request recovery.
 """
+
+from dataclasses import dataclass
 
 import structlog
 
-from ahjin.beru.types import CapabilityRequirements
+from ahjin.beru.types import CapabilityRequirements, ExecutionStrategy
+from ahjin.models.router import ModelRouter, ModelSelectionResult
 from ahjin.providers.base import BaseModelProvider
 from ahjin.providers.registry import ProviderRegistry
 from ahjin.providers.types import (
@@ -19,51 +29,81 @@ from ahjin.providers.types import (
 logger = structlog.get_logger()
 
 
-class ProviderGateway:
-    """Matches capability requirements to concrete providers and invokes them.
+@dataclass(frozen=True)
+class GatewayInvocationResult:
+    """Result of a single Gateway invocation, including routing metadata.
 
-    v1: defers capability-based routing to future implementation.
-    The default provider is used for all requests.
-    CapabilityRequirements are forwarded to the provider and logged.
+    Carries both the model response and the selection metadata needed by
+    HarnessRunner to build RuntimeInfo for Telegram observability.
     """
 
-    def __init__(self, registry: ProviderRegistry | None = None) -> None:
+    response: ModelInvocationResponse
+    selection: ModelSelectionResult
+
+
+class ProviderGateway:
+    """Matches execution strategy to concrete providers and invokes them."""
+
+    def __init__(
+        self,
+        registry: ProviderRegistry | None = None,
+        router: ModelRouter | None = None,
+    ) -> None:
         self.registry = registry or ProviderRegistry()
+        self.router = router or ModelRouter()
 
     async def invoke(
         self,
         prompt: ContextualizedPrompt,
-        requirements: CapabilityRequirements,
-    ) -> ModelInvocationResponse:
-        """Resolve provider and invoke model.
+        requirements: ExecutionStrategy | CapabilityRequirements,
+        excluded_model_ids: set[str] | None = None,
+    ) -> GatewayInvocationResult:
+        """Resolve provider and model via ModelRouter and invoke model.
 
-        v1 routing: always uses the registry default provider.
-        CapabilityRequirements are logged for observability.
-        TODO: implement capability-based provider selection when multiple
-        providers with distinct capabilities are registered.
+        ModelRouter is ALWAYS authoritative for model selection.
+        Provider lookup failure raises explicitly — no silent default-model bypass.
+
+        Returns GatewayInvocationResult bundling both the model response and the
+        selection metadata for use by HarnessRunner's RuntimeInfo assembly.
         """
-        # v1: Log requirements explicitly — capability matching not yet implemented.
-        # Do NOT silently discard them; they are a canonical architectural concept.
         logger.debug(
-            "CapabilityRequirements received (v1: default provider used)",
-            requires_reasoning=requirements.requires_reasoning,
-            requires_code=requirements.requires_code,
-            requires_vision=requirements.requires_vision,
-            max_latency_ms=requirements.max_latency_ms,
+            "Execution requirements received by gateway",
+            excluded_models=list(excluded_model_ids or []),
         )
 
-        provider: BaseModelProvider = self.registry.get_default_provider()
+        selection = self.router.select_model(
+            requirements, excluded_model_ids=excluded_model_ids
+        )
+
+        # Provider lookup: if provider_id is not registered this raises KeyError explicitly.
+        # This surfaces configuration/setup errors rather than silently selecting an
+        # arbitrary default model, which would bypass ModelRouter's authoritative decision.
+        provider: BaseModelProvider = self.registry.get_provider(selection.provider_id)
+
+        model_id = selection.model_id
+        max_tokens = selection.max_output_tokens
 
         request = ModelInvocationRequest(
             prompt=prompt,
-            model_id=provider.get_default_model_id(),
+            model_id=model_id,
+            max_tokens=max_tokens,
         )
 
         logger.info(
             "Invoking provider via gateway",
             provider_id=provider.provider_id,
             model_id=request.model_id,
+            tier=selection.tier.value,
+            router_time_ms=round(selection.selection_time_ms, 3),
         )
 
-        return await provider.invoke(request)
-
+        try:
+            response = await provider.invoke(request)
+            self.router.health_tracker.record_success(model_id, response.latency_ms)
+            return GatewayInvocationResult(response=response, selection=selection)
+        except Exception as exc:
+            self.router.health_tracker.record_failure(model_id)
+            # Attach selected model_id to exception so HarnessRunner can identify
+            # and exclude the exact failed model during same-request recovery.
+            exc.model_id = model_id  # pyright: ignore[reportAttributeAccessIssue]
+            raise

@@ -49,6 +49,7 @@ class ModelInvocationRequest(BaseModel):
     invocation_id: UUID = Field(default_factory=uuid4)
     prompt: ContextualizedPrompt
     model_id: str
+    max_tokens: int | None = None
 
 
 class ModelInvocationResponse(BaseModel):

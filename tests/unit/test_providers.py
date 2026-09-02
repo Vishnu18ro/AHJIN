@@ -89,10 +89,7 @@ def test_provider_registry_does_not_import_nvidia_credentials() -> None:
     Regression: ProviderRegistry.__init__ previously instantiated NvidiaProvider()
     which read settings.nvidia_api_key. This verifies it no longer does so.
     """
-    # If ProviderRegistry.__init__ still eagerly creates NvidiaProvider,
-    # this would fail because nvidia_model_id has no default and Settings() would raise.
-    # (In test environment, NVIDIA_MODEL_ID is not set.)
-    # This must succeed without any env variables set.
+    # Constructing empty ProviderRegistry must succeed without reading any env variables.
     registry = ProviderRegistry()
     # Registry is empty — no credentials read
     assert registry._default_provider_id is None  # noqa: SLF001

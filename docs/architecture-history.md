@@ -25,9 +25,13 @@
 ### 5. V1 Real-World Vertical Spine Verification
 - **Milestone:** Verification of complete end-to-end runtime loop using real Telegram network messages.
 - **Execution Path:** Telegram Client ──► `TelegramAdapter` ──► `TaskDispatcher` ──► `BeruOrchestrator` ──► `HarnessRunner` (`ContextAssembler`) ──► `ProviderGateway` ──► `NvidiaProvider` ──► NVIDIA API ──► Response ──► Telegram Client.
-- **Implementation Fix (Non-Architectural):** Resolved a Telegram polling lifecycle issue where `start()` returned prematurely after `start_polling()`. Added an `asyncio.Event()` wait to keep the event loop active during polling.
-- **Validation:** Distinguishes automated unit/linter tests, simulated mapper tests, and live real-world end-to-end testing.
 
-### 6. Provider Abstraction & Model Config Isolation
-- **Architectural Validation:** Changing model configuration via `NVIDIA_MODEL_ID` in `.env` required zero changes to Core, BERU, Harness, or Telegram adapter code.
-- **Runtime Observations:** Recorded empirical provider-side observations (e.g., `deepseek-ai/deepseek-v4-flash-0731` timeouts vs `meta/llama-3.2-11b-vision-instruct` responsiveness) as temporary operational states rather than permanent architectural decisions.
+### 6. V2 Multi-Model Routing & Bounded Recovery Milestone
+- **Milestone:** Complete implementation and verification of V2 Model Intelligence, ExecutionStrategy, and dynamic circuit breakers.
+- **Key Decisions & Verification**:
+  - **BERU Neutrality**: BERU outputs `ExecutionStrategy` containing zero model IDs, provider names, or API endpoints.
+  - **5-Pass In-Memory Router**: Pure in-memory selection (Capability Gate ──► Health Filter ──► Max Latency Constraint ──► Tier Match ──► Quality Preference Ranking).
+  - **Evidence-Based Health Recovery**: Cooldown expiration enables a probe attempt, but status is restored to `HEALTHY` ONLY upon empirical proof of a successful invocation.
+  - **Bounded Recovery**: Same-request rerouting is bounded by `max_recovery_attempts = 2` to prevent infinite retry latency loops.
+  - **Runtime Observability**: Added Telegram footer and `/health` / `/models` HTML snapshot commands.
+  - **Verification**: Verified real Telegram requests ("Hi" fast path, reasoning request timeout recovery, `/models` readout) and 73 automated tests.

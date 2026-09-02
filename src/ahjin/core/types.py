@@ -78,6 +78,28 @@ class TaskRequest(BaseModel):
     metadata: RequestMetadata = Field(default_factory=RequestMetadata)
 
 
+class RuntimeInfo(BaseModel):
+    """Runtime observability metadata attached to TaskResult.
+
+    Populated by HarnessRunner after execution. Used exclusively by Interface
+    adapters to render diagnostic footers. Never consumed by core routing logic.
+    """
+
+    selected_model: str = ""
+    tier: str = ""
+    provider_id: str = ""
+    # Timing in milliseconds (best-effort; 0.0 means not measured)
+    ahjin_internal_ms: float = 0.0    # BERU + routing overhead
+    model_api_ms: float = 0.0         # provider round-trip only
+    total_ms: float = 0.0             # full request time
+    # Rerouting
+    was_rerouted: bool = False
+    failed_model: str | None = None
+    failure_reason: str | None = None
+    # Health of selected model at response time
+    health_status: str = "UNKNOWN"
+
+
 class TaskResult(BaseModel):
     """Canonical result contract returned to Interface."""
 
@@ -87,3 +109,4 @@ class TaskResult(BaseModel):
     output_text: str | None = None
     error: AhjinError | None = None
     completed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    runtime_info: RuntimeInfo | None = None  # Set by HarnessRunner; None if unavailable

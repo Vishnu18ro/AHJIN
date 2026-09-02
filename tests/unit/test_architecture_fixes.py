@@ -22,6 +22,9 @@ from ahjin.core.types import ConversationTurn, RequestMetadata, Role, TaskContex
 from ahjin.harness.context import ContextAssembler
 from ahjin.harness.gateway import ProviderGateway
 from ahjin.harness.runner import HarnessRunner
+from ahjin.models.catalog import ModelCatalog
+from ahjin.models.router import ModelRouter
+from ahjin.models.types import ModelCapabilities, ModelDescriptor, ModelTier
 from ahjin.providers.base import BaseModelProvider
 from ahjin.providers.registry import ProviderRegistry
 from ahjin.providers.types import (
@@ -35,29 +38,31 @@ from ahjin.providers.types import (
 # ---------------------------------------------------------------------------
 
 
-def test_nvidia_model_id_has_no_hardcoded_default() -> None:
-    """Settings.nvidia_model_id must not contain a hardcoded model name (Fix C1).
+def test_model_selection_is_driven_by_catalog_not_settings() -> None:
+    """Settings must not contain nvidia_model_id (Fix C1).
 
-    The empty string sentinel means 'not configured'.
-    Model selection is operator-driven, not a code decision (ADR-003).
+    Model selection is fully driven by ModelCatalog & ModelRouter, not config settings.
     """
     from ahjin.core.config import Settings
 
-    # Instantiate fresh Settings without reading .env file to test code defaults
     s = Settings(_env_file=None)
-    # The default must be empty — not a real model identifier
-    assert s.nvidia_model_id == "", (
-        f"nvidia_model_id has a hardcoded default '{s.nvidia_model_id}'. "
-        "Model selection must be operator-driven configuration."
+    assert not hasattr(s, "nvidia_model_id"), (
+        "nvidia_model_id must not exist in Settings. "
+        "Model selection is driven by ModelCatalog and ModelRouter."
     )
 
 
-def test_nvidia_provider_raises_if_model_id_not_configured() -> None:
-    """NvidiaProvider must raise ValueError if model_id is empty (Fix C1)."""
-    with pytest.raises(ValueError, match="NVIDIA_MODEL_ID is not configured"):
-        from ahjin.providers.nvidia import NvidiaProvider
+def test_nvidia_provider_raises_if_model_id_missing_on_invoke() -> None:
+    """NvidiaProvider.invoke must raise ValueError if model_id is missing."""
+    from ahjin.providers.nvidia import NvidiaProvider
+    from ahjin.providers.types import ContextualizedPrompt, ModelInvocationRequest
 
-        NvidiaProvider(api_key="test-key", default_model="")
+    provider = NvidiaProvider(api_key="test-key", default_model="")
+    req = ModelInvocationRequest(prompt=ContextualizedPrompt(user_instruction="hi"), model_id="")
+
+    with pytest.raises(ValueError, match="model_id is not specified"):
+        import asyncio
+        asyncio.run(provider.invoke(req))
 
 
 # ---------------------------------------------------------------------------
@@ -127,15 +132,19 @@ def test_context_assembler_produces_contextualized_prompt() -> None:
 class CapabilityLoggingProvider(BaseModelProvider):
     """Provider that records the invocation request for inspection."""
 
+    # provider_id matches what we put in the test catalog below
+    _PROVIDER_ID = "cap_logging_provider"
+    _MODEL_ID = "cap-logging-model"
+
     def __init__(self) -> None:
         self.last_request: ModelInvocationRequest | None = None
 
     @property
     def provider_id(self) -> str:
-        return "cap_logging"
+        return self._PROVIDER_ID
 
     def get_default_model_id(self) -> str:
-        return "cap-logging-model"
+        return self._MODEL_ID
 
     async def invoke(self, request: ModelInvocationRequest) -> ModelInvocationResponse:
         self.last_request = request
@@ -152,11 +161,23 @@ async def test_capability_requirements_forwarded_to_gateway() -> None:
     """CapabilityRequirements must not be silently discarded (Fix H3).
 
     Gateway must accept and log requirements. Provider must be invoked.
+    Injection uses the correct seam: catalog + router + registry all consistent.
     """
-    registry = ProviderRegistry()
     provider = CapabilityLoggingProvider()
+    # Build a catalog where the single model uses this test provider_id
+    catalog = ModelCatalog()
+    catalog.register(
+        ModelDescriptor(
+            model_id=provider.get_default_model_id(),
+            provider_id=provider.provider_id,
+            tier=ModelTier.HEAVY,
+            capabilities=ModelCapabilities(reasoning=True),
+        )
+    )
+    registry = ProviderRegistry()
     registry.register(provider)
-    gateway = ProviderGateway(registry=registry)
+    router = ModelRouter(catalog=catalog)
+    gateway = ProviderGateway(registry=registry, router=router)
 
     prompt = ContextualizedPrompt(user_instruction="What is 2+2?")
     requirements = CapabilityRequirements(
@@ -165,8 +186,8 @@ async def test_capability_requirements_forwarded_to_gateway() -> None:
     )
 
     # Gateway must not raise and must invoke the provider
-    response = await gateway.invoke(prompt=prompt, requirements=requirements)
-    assert response.content == "ok"
+    gw_result = await gateway.invoke(prompt=prompt, requirements=requirements)
+    assert gw_result.response.content == "ok"
     assert provider.last_request is not None
 
 
@@ -175,37 +196,56 @@ async def test_capability_requirements_forwarded_to_gateway() -> None:
 # ---------------------------------------------------------------------------
 
 
+_FAILING_PROVIDER_ID = "failing_provider"
+_FAILING_MODEL_ID = "failing-model"
+
+
 class FailingProvider(BaseModelProvider):
-    """Provider that raises an httpx error to simulate a real network failure."""
+    """Provider that raises an error to simulate network/server failures."""
 
     def __init__(self, exc: Exception) -> None:
         self._exc = exc
 
     @property
     def provider_id(self) -> str:
-        return "failing"
+        return _FAILING_PROVIDER_ID
 
     def get_default_model_id(self) -> str:
-        return "failing-model"
+        return _FAILING_MODEL_ID
 
     async def invoke(self, request: ModelInvocationRequest) -> ModelInvocationResponse:
         raise self._exc
 
 
+def _build_failing_gateway(exc: Exception) -> ProviderGateway:
+    """Build a gateway wired to a FailingProvider via a matching catalog."""
+    catalog = ModelCatalog()
+    catalog.register(
+        ModelDescriptor(
+            model_id=_FAILING_MODEL_ID,
+            provider_id=_FAILING_PROVIDER_ID,
+            tier=ModelTier.FAST,
+            capabilities=ModelCapabilities(),
+        )
+    )
+    registry = ProviderRegistry()
+    registry.register(FailingProvider(exc))
+    router = ModelRouter(catalog=catalog)
+    return ProviderGateway(registry=registry, router=router)
+
+
 @pytest.mark.asyncio
 async def test_harness_runner_returns_failure_on_http_error() -> None:
     """Harness must catch httpx errors and return TaskResult.success=False (Fix 6)."""
-    registry = ProviderRegistry()
-    registry.register(
-        FailingProvider(
-            httpx.HTTPStatusError(
-                "500 Internal Server Error",
-                request=httpx.Request("POST", "https://api.nvidia.com/v1"),
-                response=httpx.Response(500),
-            )
+    from ahjin.beru.types import ExecutionStrategy
+
+    gateway = _build_failing_gateway(
+        httpx.HTTPStatusError(
+            "500 Internal Server Error",
+            request=httpx.Request("POST", "https://api.nvidia.com/v1"),
+            response=httpx.Response(500),
         )
     )
-    gateway = ProviderGateway(registry=registry)
     runner = HarnessRunner(gateway=gateway)
 
     plan = ExecutionPlan(
@@ -216,7 +256,12 @@ async def test_harness_runner_returns_failure_on_http_error() -> None:
                 step_type=StepType.MODEL_INVOCATION,
                 model_intent=ModelStepIntent(
                     instruction="Hello",
-                    capability_requirements=CapabilityRequirements(),
+                    execution_strategy=ExecutionStrategy(
+                        capability_requirements=CapabilityRequirements(),
+                        preferred_tier="FAST",
+                        # Only 1 attempt so the test runs fast
+                        max_recovery_attempts=1,
+                    ),
                 ),
             )
         ],
@@ -232,14 +277,14 @@ async def test_harness_runner_returns_failure_on_http_error() -> None:
 
 @pytest.mark.asyncio
 async def test_harness_runner_propagates_programming_errors() -> None:
-    """Non-httpx exceptions must NOT be swallowed by Harness (Fix 6).
+    """Non-httpx/non-capability exceptions must propagate (Fix 6).
 
     Real bugs (ValueError, KeyError, etc.) must propagate so they are
     visible and not silently converted to INVOCATION_FAILED errors.
     """
-    registry = ProviderRegistry()
-    registry.register(FailingProvider(ValueError("BUG: unexpected state")))
-    gateway = ProviderGateway(registry=registry)
+    from ahjin.beru.types import ExecutionStrategy
+
+    gateway = _build_failing_gateway(ValueError("BUG: unexpected state"))
     runner = HarnessRunner(gateway=gateway)
 
     plan = ExecutionPlan(
@@ -250,7 +295,11 @@ async def test_harness_runner_propagates_programming_errors() -> None:
                 step_type=StepType.MODEL_INVOCATION,
                 model_intent=ModelStepIntent(
                     instruction="Hello",
-                    capability_requirements=CapabilityRequirements(),
+                    execution_strategy=ExecutionStrategy(
+                        capability_requirements=CapabilityRequirements(),
+                        preferred_tier="FAST",
+                        max_recovery_attempts=1,
+                    ),
                 ),
             )
         ],
