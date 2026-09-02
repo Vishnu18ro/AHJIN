@@ -12,7 +12,8 @@ Routing pipeline:
 2. Health/Excluded Filter — eliminates unhealthy or already-failed models
 3. Hard Latency Constraint — eliminates models violating explicit max_latency_ms
 4. Tier Match             — prefer requested tier; fall back to all healthy if unavailable
-5. Ranking Pass           — quality_score (and quality_preference) determines final winner
+5. Ranking Pass           — priority is the primary ordinal key; quality_score (and
+                            quality_preference) breaks ties within the same-priority group
 """
 
 import time
@@ -161,16 +162,18 @@ class ModelRouter:
         tier_matched = [m for m in healthy_models if m.tier == target_tier]
         candidates = tier_matched if tier_matched else healthy_models
 
-        # 6. RANKING PASS — Model Strength/Quality determines PRIORITY among ELIGIBLE models.
+        # 6. RANKING PASS — Two-key sort: catalog preference ordinal first, then quality.
         #
-        # quality_preference adjusts the weight given to quality_score vs. speed (latency):
-        #   "quality"  → maximize quality_score; latency penalty is minimal
-        #   "speed"    → heavy latency penalty; quality_score weight is reduced
-        #   "balanced" → moderate on both axes (default)
+        # Key 1 — ``priority`` (DESC): Explicit catalog preference order encoded by the operator.
+        #   A higher-priority model ALWAYS beats a lower-priority model among eligible candidates,
+        #   regardless of quality_score or quality_preference. No arithmetic constant required.
         #
-        # endpoint_verified contributes only a +0.001 micro tie-breaker, not intelligence signal.
-        best_model: ModelDescriptor | None = None
-        best_score: float = -float("inf")
+        # Key 2 — blended score (DESC): Used ONLY to break ties within the same-priority group.
+        #   quality_preference adjusts the weight given to quality_score vs. speed (latency):
+        #     "quality"  → maximize quality_score; latency penalty is minimal
+        #     "speed"    → heavy latency penalty; quality_score weight is reduced
+        #     "balanced" → moderate on both axes (default)
+        #   endpoint_verified contributes only a +0.001 micro tie-breaker.
 
         if quality_preference == "speed":
             quality_weight = 1.0
@@ -182,18 +185,19 @@ class ModelRouter:
             quality_weight = 2.0
             latency_penalty = 0.01
 
-        for model in candidates:
+        def _blended_score(model: ModelDescriptor) -> float:
             health = self.health_tracker.get_state(model.model_id)
-            score = (float(model.quality_score) * quality_weight) + float(model.priority)
+            score = float(model.quality_score) * quality_weight
             ema = health.snapshot_ema_latency_ms
             if ema > 0:
                 score -= latency_penalty * ema
             if model.endpoint_verified:
                 score += 0.001  # micro tie-breaker only
+            return score
 
-            if score > best_score:
-                best_score = score
-                best_model = model
+        # Stable two-key sort: primary = priority DESC, secondary = blended_score DESC.
+        # Python's sort is stable, so equal-priority models preserve insertion order as a tertiary.
+        best_model = max(candidates, key=lambda m: (m.priority, _blended_score(m)))
 
         assert best_model is not None
 

@@ -37,7 +37,18 @@ class ModelCatalog:
 
 
 def create_default_catalog() -> ModelCatalog:
-    """Create and return default ModelCatalog seeded with candidate models."""
+    """Create and return default ModelCatalog seeded with candidate models.
+
+    Active catalog (5 models):
+      FAST  tier: Nemotron Lightning 30B
+      HEAVY tier: Kimi K3 (preferred #1), Nemotron Ultra 550B (#2),
+                  DeepSeek V4 Pro (#3), DeepSeek V4 Flash (#4)
+
+    Explicit preference is encoded in ``priority``. The router ranking formula
+    weights priority heavily (×10) so that catalog preference ordering is always
+    preserved among otherwise-eligible candidates, regardless of quality_preference
+    mode. quality_score still differentiates within the same-priority group.
+    """
     catalog = ModelCatalog()
 
     # 1. FAST EXECUTION TIER Candidate (Verified Active Endpoint)
@@ -60,7 +71,30 @@ def create_default_catalog() -> ModelCatalog:
         )
     )
 
-    # 2. HEAVY / CORE REASONING TIER Candidates (Verified & Unverified Endpoints)
+    # 2. HEAVY / CORE REASONING TIER Candidates — preference order encoded in priority.
+    #    Kimi K3 (priority=200) → Nemotron Ultra (170) → DeepSeek Pro (150) → DeepSeek Flash (130)
+
+    # Preference #1: Kimi K3
+    catalog.register(
+        ModelDescriptor(
+            model_id="moonshotai/kimi-k3",
+            provider_id="nvidia",
+            tier=ModelTier.HEAVY,
+            capabilities=ModelCapabilities(
+                reasoning=True,
+                coding=True,
+                vision=False,
+                tool_calling=True,
+                long_context=True,
+            ),
+            limits=ModelLimits(max_context_tokens=128000, max_output_tokens=4096),
+            priority=200,
+            quality_score=87,
+            endpoint_verified=False,
+        )
+    )
+
+    # Preference #2: Nemotron Ultra 550B
     catalog.register(
         ModelDescriptor(
             model_id="nvidia/nemotron-3-ultra-550b-a55b",
@@ -74,12 +108,13 @@ def create_default_catalog() -> ModelCatalog:
                 long_context=True,
             ),
             limits=ModelLimits(max_context_tokens=128000, max_output_tokens=4096),
-            priority=150,
+            priority=170,
             quality_score=95,
             endpoint_verified=True,
         )
     )
 
+    # Preference #3: DeepSeek V4 Pro
     catalog.register(
         ModelDescriptor(
             model_id="deepseek-ai/deepseek-v4-pro-0813",
@@ -93,12 +128,13 @@ def create_default_catalog() -> ModelCatalog:
                 long_context=True,
             ),
             limits=ModelLimits(max_context_tokens=128000, max_output_tokens=4096),
-            priority=140,
+            priority=150,
             quality_score=92,
             endpoint_verified=False,
         )
     )
 
+    # Preference #4: DeepSeek V4 Flash
     catalog.register(
         ModelDescriptor(
             model_id="deepseek-ai/deepseek-v4-flash-0731",
@@ -114,44 +150,6 @@ def create_default_catalog() -> ModelCatalog:
             limits=ModelLimits(max_context_tokens=128000, max_output_tokens=4096),
             priority=130,
             quality_score=90,
-            endpoint_verified=False,
-        )
-    )
-
-    catalog.register(
-        ModelDescriptor(
-            model_id="moonshotai/kimi-k3",
-            provider_id="nvidia",
-            tier=ModelTier.HEAVY,
-            capabilities=ModelCapabilities(
-                reasoning=True,
-                coding=True,
-                vision=False,
-                tool_calling=True,
-                long_context=True,
-            ),
-            limits=ModelLimits(max_context_tokens=128000, max_output_tokens=4096),
-            priority=110,
-            quality_score=87,
-            endpoint_verified=False,
-        )
-    )
-
-    catalog.register(
-        ModelDescriptor(
-            model_id="minimaxai/minimax-m3",
-            provider_id="nvidia",
-            tier=ModelTier.HEAVY,
-            capabilities=ModelCapabilities(
-                reasoning=True,
-                coding=True,
-                vision=False,
-                tool_calling=True,
-                long_context=False,
-            ),
-            limits=ModelLimits(max_context_tokens=32000, max_output_tokens=4096),
-            priority=100,
-            quality_score=86,
             endpoint_verified=False,
         )
     )

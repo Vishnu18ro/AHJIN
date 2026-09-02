@@ -27,13 +27,13 @@ def test_fast_execution_tier_selected_for_general_tasks() -> None:
 
 
 def test_heavy_reasoning_tier_selected_when_reasoning_required() -> None:
-    """Heavy tier must be selected when reasoning is explicitly required."""
+    """Heavy tier must be selected when reasoning is explicitly required (Kimi K3 preferred)."""
     router = ModelRouter(catalog=create_default_catalog())
     reqs = CapabilityRequirements(requires_reasoning=True)
 
     selection = router.select_model(reqs)
     assert selection.tier == ModelTier.HEAVY
-    assert selection.model_id == "nvidia/nemotron-3-ultra-550b-a55b"
+    assert selection.model_id == "moonshotai/kimi-k3"
 
 
 def test_stronger_incapable_model_must_never_beat_weaker_capable_model() -> None:
@@ -182,22 +182,22 @@ def test_endpoint_verified_acts_as_tie_breaker_for_equal_scores() -> None:
 
 
 def test_unhealthy_strongest_model_skipped_and_healthy_alternative_selected() -> None:
-    """If the strongest model is UNHEALTHY, router selects next best healthy eligible model."""
+    """If the preferred model is UNHEALTHY, router selects next best healthy eligible model."""
     catalog = create_default_catalog()
     health = ModelHealthTracker()
 
-    # Mark top nemotron ultra model unhealthy
-    health.record_failure("nvidia/nemotron-3-ultra-550b-a55b")
-    health.record_failure("nvidia/nemotron-3-ultra-550b-a55b")
-    health.record_failure("nvidia/nemotron-3-ultra-550b-a55b")
-    target_state = health.get_state("nvidia/nemotron-3-ultra-550b-a55b")
+    # Mark top Kimi K3 model unhealthy
+    health.record_failure("moonshotai/kimi-k3")
+    health.record_failure("moonshotai/kimi-k3")
+    health.record_failure("moonshotai/kimi-k3")
+    target_state = health.get_state("moonshotai/kimi-k3")
     assert target_state.status == ModelHealthStatus.UNHEALTHY
 
     router = ModelRouter(catalog=catalog, health_tracker=health)
     reqs = CapabilityRequirements(requires_reasoning=True)
 
     selection = router.select_model(reqs)
-    assert selection.model_id == "deepseek-ai/deepseek-v4-pro-0813"
+    assert selection.model_id == "nvidia/nemotron-3-ultra-550b-a55b"
     assert selection.tier == ModelTier.HEAVY
 
 
@@ -208,9 +208,11 @@ def test_capability_unavailable_error_if_all_models_incapable() -> None:
         ModelDescriptor(
             model_id="text-only-model",
             provider_id="mock",
+            tier=ModelTier.HEAVY,
             capabilities=ModelCapabilities(vision=False),
         )
     )
+
     router = ModelRouter(catalog=catalog)
     reqs = CapabilityRequirements(requires_vision=True)
 
@@ -269,11 +271,11 @@ async def test_harness_same_request_rerouting_on_degraded_model_failure() -> Non
         provider_id = "nvidia"
 
         def get_default_model_id(self) -> str:
-            return "nvidia/nemotron-3-ultra-550b-a55b"
+            return "moonshotai/kimi-k3"
 
         async def invoke(self, request: ModelInvocationRequest) -> ModelInvocationResponse:
             invoked_models.append(request.model_id)
-            if request.model_id == "nvidia/nemotron-3-ultra-550b-a55b":
+            if request.model_id == "moonshotai/kimi-k3":
                 # Standard httpx exception without custom model_id attribute
                 raise httpx.RequestError(
                     "Connection reset",
@@ -316,6 +318,7 @@ async def test_harness_same_request_rerouting_on_degraded_model_failure() -> Non
     assert res.success is True
     assert res.output_text == "Response from alternative model"
     # Verify that the primary model was attempted first, failed, and WAS NOT selected again
-    assert invoked_models[0] == "nvidia/nemotron-3-ultra-550b-a55b"
-    assert invoked_models[1] == "deepseek-ai/deepseek-v4-pro-0813"
+    assert invoked_models[0] == "moonshotai/kimi-k3"
+    assert "moonshotai/kimi-k3" not in invoked_models[1:]
+    assert invoked_models[1] == "nvidia/nemotron-3-ultra-550b-a55b"
     assert invoked_models[0] != invoked_models[1]

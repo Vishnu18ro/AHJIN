@@ -61,7 +61,6 @@ def _model_short_name(model_id: str) -> str:
         "deepseek-ai/deepseek-v4-pro-0813": "DeepSeek V4 Pro",
         "deepseek-ai/deepseek-v4-flash-0731": "DeepSeek V4 Flash",
         "moonshotai/kimi-k3": "Kimi K3",
-        "minimaxai/minimax-m3": "MiniMax M3",
     }
     return label_map.get(model_id, model_id.split("/")[-1])
 

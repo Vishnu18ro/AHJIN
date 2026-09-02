@@ -112,7 +112,7 @@ async def test_simple_task_fast_tier_routing() -> None:
 
 @pytest.mark.asyncio
 async def test_reasoning_task_heavy_tier_routing() -> None:
-    """Reasoning prompt must route to HEAVY tier (Nemotron Ultra 550B)."""
+    """Reasoning prompt must route to HEAVY tier (Kimi K3 preferred)."""
     catalog = create_default_catalog()
     registry = ProviderRegistry()
 
@@ -122,7 +122,7 @@ async def test_reasoning_task_heavy_tier_routing() -> None:
             return "nvidia"
 
         def get_default_model_id(self) -> str:
-            return "nvidia/nemotron-3-ultra-550b-a55b"
+            return "moonshotai/kimi-k3"
 
         async def invoke(self, request: ModelInvocationRequest) -> ModelInvocationResponse:
             return ModelInvocationResponse(
@@ -145,10 +145,10 @@ async def test_reasoning_task_heavy_tier_routing() -> None:
     assert res.success is True
     assert res.runtime_info is not None
     assert res.runtime_info.tier == "HEAVY"
-    assert res.runtime_info.selected_model == "nvidia/nemotron-3-ultra-550b-a55b"
+    assert res.runtime_info.selected_model == "moonshotai/kimi-k3"
 
     footer = _build_runtime_footer(res.runtime_info)
-    assert "Model: Nemotron Ultra 550B" in footer
+    assert "Model: Kimi K3" in footer
     assert "Route: HEAVY" in footer
 
 
